@@ -1,0 +1,41 @@
+# Environment variables
+.env
+.env.local
+
+# Next.js
+.next
+out
+build
+
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database
+app/data/*.db*
+app/data/*.sqlite*
+data/
+
+# Personal / Scratch folders (DO NOT PUSH)
+scratch/
+HR-email-Automation/
+outreach-emails/
+
+# Personal documents, CSVs, PDFs
+*.pdf
+*.csv
+*.md
+!README.md
+!USER_GUIDE.md
+!app/README.md
+*.txt
+*.xlsx
+
+# macOS
+.DS_Store
+
+# Logs
+logs
+*.log
