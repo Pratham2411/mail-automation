@@ -13,25 +13,27 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Database
+# Database files (user data - never push)
 app/data/*.db*
 app/data/*.sqlite*
-data/
+
+# Allow the seed CSV (public company contacts)
+!data/emails.csv
 
 # Personal / Scratch folders (DO NOT PUSH)
 scratch/
 HR-email-Automation/
 outreach-emails/
 
-# Personal documents, CSVs, PDFs
-*.pdf
-*.csv
-*.md
-!README.md
-!USER_GUIDE.md
-!app/README.md
-*.txt
-*.xlsx
+# Personal documents (your private files)
+368537108-HR-Detail.txt
+996009979-421829855-Placements-Hr-Details.pdf
+Compiled_Contacts_Database.csv
+DOC-20260823-WA0005*.pdf
+DOC-20260824-WA0002.pdf
+recruiter_hr_public_sources*.md
+sheet.md
+Top_Company_HR_Contacts.*
 
 # macOS
 .DS_Store
