@@ -17,8 +17,9 @@ yarn-error.log*
 app/data/*.db*
 app/data/*.sqlite*
 
-# Allow the seed CSV (public company contacts)
+# Allow the seed CSVs (public company contacts)
 !data/emails.csv
+!data/all_contacts.csv
 
 # Personal / Scratch folders (DO NOT PUSH)
 scratch/
