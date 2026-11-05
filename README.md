@@ -1,159 +1,64 @@
-# 🚀 RecruiterReach
+# Mail Automation
 
-**Automated recruiter outreach & email automation for freshers/new grads.**
+Simple CLI tool to send personalized cold emails to recruiters at scale.
 
-Manage recruiter contacts, create personalized email campaigns, and send at scale — all from a beautiful local dashboard.
+## Setup
 
-> Built by a fresher, for freshers. Open source. No SaaS fees.
-
----
-
-## ✨ Features
-
-### 🎯 Company Campaign Outreach
-- Group contacts by company → generate personalized drafts for everyone at once
-- **Inline editing** — edit subject/body before sending
-- **Email preview** — see exactly what the recipient will see inline without modals
-- Approve all → batch send with configurable delays
-- Track sent/draft/failed status per company
-
-### 📧 Email Automation
-- Gmail OAuth2 integration — send real emails from your Gmail
-- Template system with `{{variables}}` — auto-fills your name, skills, company, etc.
-- Batch sending with rate limiting and daily limits
-- Test mode — record emails without actually sending
-- Retry failed emails with one click
-
-### 👥 Contact Management
-- Import contacts from CSV/Excel/PDF
-- Tier system (1-3) for prioritization
-- Email verification status tracking
-- Company profiles with tech stack and careers URL
-
-### 📊 Dashboard
-- Real-time stats: contacts, emails sent, drafts pending
-- Status breakdown by company
-- Quick actions from one central view
-
----
-
-## 🏁 Quick Start & Setup Guide
-
-### Prerequisites
-- [Node.js](https://nodejs.org/) v18+ (LTS recommended)
-
-### One-Click Setup (Recommended)
-
-**Windows:**
-1. Download or clone this repository.
-2. Double-click `setup.bat`.
-3. The script will automatically install dependencies, set up the SQLite database, and open `http://localhost:3000` in your browser.
-
-**macOS / Linux:**
-1. Open your terminal.
-2. Run `chmod +x setup.sh`
-3. Run `./setup.sh`
-4. This will install dependencies, setup the database, and launch the dashboard.
-
-### Manual Setup
-If you prefer setting it up manually:
 ```bash
-# 1. Navigate to the app directory
-cd app
-
-# 2. Install dependencies
-npm install
-
-# 3. Start the development server
-npm run dev
-
-# 4. Open http://localhost:3000 in your browser
+npm install          # install dependencies (better-sqlite3, nodemailer)
+node retier.js       # one-time: auto-rank contacts by company tier
 ```
 
----
+## Usage
 
-## ⚙️ Configuration
-
-### Gmail OAuth2 Setup (for sending emails)
-
-You can use the contact management and template features without Gmail setup. Set this up only when you're ready to send emails.
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project → Enable **Gmail API**
-3. Create **OAuth 2.0 credentials** (Desktop app type)
-4. Add your email as a test user under **OAuth consent screen**
-5. Use the [OAuth Playground](https://developers.google.com/oauthplayground/) to get a refresh token:
-   - Authorize with scope `https://mail.google.com/`
-   - Exchange the code for a refresh token
-6. Enter your Client ID, Client Secret, and Refresh Token in **Settings** → **Gmail OAuth2** in the app.
-7. Click **Test Connection** to verify.
-
----
-
-## 🛠 Troubleshooting & Common Issues
-
-| Issue | Cause / Solution |
-|-------|-----------------|
-| **`npm install` fails** | Ensure you have Node.js installed correctly. Try running `npm cache clean --force` and run `npm install` again. |
-| **"Cannot find module better-sqlite3"** | Your SQLite binary might need to be rebuilt. Run `npm rebuild better-sqlite3` in the `app` folder. |
-| **Gmail OAuth Error / "Invalid Grant"** | Your Refresh Token has expired (often happens if your app is in "Testing" mode on Google Cloud after 7 days). Re-authenticate via Google OAuth Playground to get a new token. |
-| **Emails are failing to send** | Check your daily limit in Settings. Gmail restricts daily sending limits (typically 500 for standard accounts). Also, verify your internet connection. |
-| **Port 3000 is already in use** | Stop any other processes using port 3000, or run the app on a different port using `npm run dev -- -p 3001` (update your URL accordingly). |
-
----
-
-## 📁 Project Structure
-
-```
-RecruiterReach/
-├── setup.bat          # Windows one-click launcher
-├── setup.sh           # macOS/Linux one-click launcher
-├── app/               # Next.js application
-│   ├── src/
-│   │   ├── app/       # Pages & API routes
-│   │   │   ├── api/   # REST API endpoints
-│   │   │   ├── campaigns/ # Company outreach campaigns
-│   │   │   ├── outreach/  # Email pipeline
-│   │   │   ├── compose/   # Single email composer
-│   │   │   ├── contacts/  # Contact management
-│   │   │   ├── templates/ # Email templates
-│   │   │   └── settings/  # Configuration
-│   │   └── lib/       # Database, email, utilities
-│   ├── data/          # SQLite database (auto-created - ignored in Git)
-│   └── package.json
-└── README.md
+```bash
+node send.js              # send next batch (25 emails)
+node send.js --count 50   # send 50 instead
+node send.js --dry-run    # preview next batch without sending
+node send.js --status     # show campaign stats
+node send.js --reset      # reset all contacts to "Not Contacted"
 ```
 
----
+## Configuration
 
-## 🛠 Tech Stack
+Edit `config.json` to set:
+- **senders** — Gmail account(s) with OAuth2 credentials
+- **message** — subject + body template (supports `{{name}}`, `{{company}}`, `{{resume_link}}`)
+- **resume_link** — your resume URL
+- **daily_limit** — max emails per day (default: 80)
+- **batch_size** — emails per run (default: 25)
+- **delay_min_ms / delay_max_ms** — random delay between emails (3-8 sec)
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 16, React 19 |
-| Backend | Next.js API Routes |
-| Database | SQLite (better-sqlite3) |
-| Email | Nodemailer + Gmail OAuth2 |
-| Styling | Vanilla CSS (dark mode) |
+### Gmail OAuth2 Setup
 
-**Zero external services required.** Everything runs locally. Your data stays on your machine.
+1. Go to [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials)
+2. Create an OAuth 2.0 Client ID (Web application)
+3. Add `https://developers.google.com/oauthplayground` as an Authorized redirect URI
+4. Open [OAuth Playground](https://developers.google.com/oauthplayground)
+5. Use your own OAuth credentials (gear icon) → authorize `https://mail.google.com/`
+6. Exchange for tokens → copy the **Refresh Token**
+7. Paste Client ID, Client Secret, and Refresh Token into `config.json`
 
----
+## Anti-Spam Features
 
-## 🤝 Contributing
+- Random delays between emails (3-8 sec, not fixed)
+- Batch cooldown every 25 emails (2-5 min pause)
+- Daily limit (80/day default)
+- Plain text only (no HTML/images/tracking pixels)
+- Personalized per contact (name, company)
+- Sender rotation (if multiple accounts)
+- Auto-backoff on rate limits
 
-PRs welcome! Some ideas:
-- Add email open tracking
-- Add follow-up automation
-- Build a Chrome extension for contact collection
-- Add more import formats (Google Sheets, Notion)
+## Auto-Prioritized Send Order
 
----
+1. **Tier 1** — FAANG, Quant, Top Product companies
+2. **Tier 2** — Top Indian Startups & Unicorns
+3. **Tier 3** — Well-Paying MNCs & IT
+4. **Untiered** — Everything else
 
-## 📝 License
+Within each tier, contacts with real person names go before generic ones (HR, Recruiter, Team).
 
-MIT — use it, modify it, share it.
+## Database
 
----
-
-**Built with ❤️ for the job search grind. Star ⭐ this repo if it helps!**
+- `data/recruiter.db` — SQLite database with 16,000+ recruiter contacts
+- `data/all_contacts.csv` — raw CSV export of all contacts

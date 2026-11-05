@@ -1,0 +1,17 @@
+{
+  "name": "mail-automation",
+  "version": "2.0.0",
+  "description": "Simple recruiter email blaster",
+  "main": "send.js",
+  "scripts": {
+    "send": "node send.js",
+    "dry-run": "node send.js --dry-run",
+    "status": "node send.js --status",
+    "retier": "node retier.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "nodemailer": "^6.9.0"
+  }
+}
+
