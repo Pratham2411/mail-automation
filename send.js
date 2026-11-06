@@ -120,29 +120,17 @@ function cleanCompanyName(raw) {
   return s.trim();
 }
 
-const GREETINGS_NAMED = [
-  (name) => `Hi ${name},`,
-  (name) => `Hello ${name},`,
-  (name) => `Dear ${name},`,
+const GREETINGS = [
+  'Hi Hiring Team,',
+  'Hello Hiring Team,',
+  'Dear Hiring Team,',
+  'Dear Recruiter,',
+  'Hi Recruiter,',
+  'Dear Hiring Manager,',
 ];
 
-const GREETINGS_GENERIC = [
-  (comp) => `Hi Hiring Team,`,
-  (comp) => `Hello ${comp ? comp + ' Team' : 'Hiring Team'},`,
-  (comp) => `Dear Hiring Manager,`,
-  (comp) => `Hi there,`,
-];
-
-function generateGreeting(contact) {
-  const comp = cleanCompanyName(contact.company);
-  if (contact.name && !isGenericName(contact.name)) {
-    let fn = contact.name.trim().split(' ')[0];
-    fn = fn.charAt(0).toUpperCase() + fn.slice(1).toLowerCase();
-    const gFn = GREETINGS_NAMED[Math.floor(Math.random() * GREETINGS_NAMED.length)];
-    return gFn(fn);
-  }
-  const gGen = GREETINGS_GENERIC[Math.floor(Math.random() * GREETINGS_GENERIC.length)];
-  return gGen(comp);
+function generateGreeting() {
+  return GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
 }
 
 function getSubject(contact, templateIdx) {
@@ -156,8 +144,7 @@ function getSubject(contact, templateIdx) {
   ];
   const pool = (config.subjects && config.subjects.length > 0) ? config.subjects : defaultSubjects;
   const picked = pool[templateIdx % pool.length];
-  const comp = cleanCompanyName(contact.company);
-  return picked.replace(/\{\{company\}\}/g, comp || 'your company');
+  return picked.replace(/\{\{company\}\}/g, 'your organization');
 }
 
 function getTemplates() {
@@ -171,19 +158,13 @@ function getTemplates() {
 }
 
 function personalize(templateBody, contact, sender) {
-  const comp = cleanCompanyName(contact.company) || 'your organization';
-  const greeting = generateGreeting(contact);
-  let firstName = 'Hiring Team';
-  if (contact.name && !isGenericName(contact.name)) {
-    firstName = contact.name.trim().split(' ')[0];
-    firstName = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
-  }
+  const greeting = generateGreeting();
 
   return templateBody
     .replace(/\{\{greeting\}\}/g, greeting)
-    .replace(/\{\{name\}\}/g, firstName)
-    .replace(/\{\{full_name\}\}/g, contact.name || 'Hiring Team')
-    .replace(/\{\{company\}\}/g, comp)
+    .replace(/\{\{name\}\}/g, 'Hiring Team')
+    .replace(/\{\{full_name\}\}/g, 'Hiring Team')
+    .replace(/\{\{company\}\}/g, 'your organization')
     .replace(/\{\{resume_link\}\}/g, config.resume_link || '')
     .replace(/\{\{portfolio_link\}\}/g, config.portfolio_link || 'https://pratham2411.online')
     .replace(/\{\{github_link\}\}/g, config.github_link || 'https://github.com/Pratham2411')
