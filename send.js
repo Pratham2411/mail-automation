@@ -1,9 +1,17 @@
 #!/usr/bin/env node
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  send.js — Multi-Account Recruiter Email Blaster
+//  send.js — Multi-Account Recruiter Email Blaster (Anti-Spam Edition)
+//
+//  Features:
+//    • Multi-account rotation with per-sender daily quotas (80/account)
+//    • Rotates 5 distinct email templates & varied subject lines
+//    • Dynamic greetings & name capitalization (prevents bulk hash matching)
+//    • Verified sender-matching Reply-To (prevents DMARC/anti-spoofing flags)
+//    • Humanized delays (15–35s) + micro-pauses (30–60s) + batch cooldowns
+//    • Local-time midnight quota resets
 //
 //  Usage:
-//    node send.js                Send next batch (auto-rotates active accounts)
+//    node send.js                Send next batch (rotates active accounts & templates)
 //    node send.js --from 1       Send specifically from Account 1
 //    node send.js --from 2       Send specifically from Account 2
 //    node send.js --from <email> Send specifically from matching email
@@ -12,6 +20,7 @@
 //    node send.js --dry-run      Preview next batch without sending
 //    node send.js --count 50     Send 50 instead of default batch
 //    node send.js --reset-daily  Reset today's sent count back to 0
+//    node send.js --fast         Shorter delays (for quick test runs)
 //    node send.js --reset        Reset ALL contacts back to "Not Contacted"
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -44,11 +53,15 @@ db.exec(`
     contact_id INTEGER,
     email TEXT,
     sender TEXT,
+    template_id INTEGER,
+    subject TEXT,
     sent_at TEXT DEFAULT (datetime('now')),
     status TEXT DEFAULT 'sent',
     error TEXT
   )
 `);
+try { db.exec('ALTER TABLE send_log ADD COLUMN template_id INTEGER'); } catch (_) {}
+try { db.exec('ALTER TABLE send_log ADD COLUMN subject TEXT'); } catch (_) {}
 
 // ─── Parse Args ──────────────────────────────────────
 const args = process.argv.slice(2);
@@ -57,6 +70,8 @@ const showStatus = args.includes('--status');
 const showAccounts = args.includes('--accounts');
 const doReset = args.includes('--reset');
 const doResetDaily = args.includes('--reset-daily') || args.includes('--reset-today');
+const isFastMode = args.includes('--fast');
+const corporateOnly = args.includes('--corporate-only');
 
 let batchSize = config.batch_size || 25;
 const countIdx = args.indexOf('--count');
@@ -86,7 +101,6 @@ function isGenericName(name) {
   const n = name.trim().toLowerCase();
   if (n.length < 3) return true;
   if (GENERIC_NAMES.has(n)) return true;
-  // Job titles stuck in the name field
   const titleWords = [
     'senior', 'junior', 'lead', 'manager', 'director', 'head', 'chief',
     'specialist', 'coordinator', 'associate', 'partner', 'executive',
@@ -98,17 +112,84 @@ function isGenericName(name) {
   return false;
 }
 
-function personalize(template, contact) {
+function cleanCompanyName(raw) {
+  if (!raw) return '';
+  let s = raw.trim();
+  s = s.replace(/^[-–—•\s]+/, '');
+  s = s.replace(/\s+(pvt\.?\s*ltd\.?|private\s*limited|ltd\.?|inc\.?|llc|technologies|solutions|corporation|corp\.?)$/i, '');
+  return s.trim();
+}
+
+const GREETINGS_NAMED = [
+  (name) => `Hi ${name},`,
+  (name) => `Hello ${name},`,
+  (name) => `Dear ${name},`,
+];
+
+const GREETINGS_GENERIC = [
+  (comp) => `Hi Hiring Team,`,
+  (comp) => `Hello ${comp ? comp + ' Team' : 'Hiring Team'},`,
+  (comp) => `Dear Hiring Manager,`,
+  (comp) => `Hi there,`,
+];
+
+function generateGreeting(contact) {
+  const comp = cleanCompanyName(contact.company);
+  if (contact.name && !isGenericName(contact.name)) {
+    let fn = contact.name.trim().split(' ')[0];
+    fn = fn.charAt(0).toUpperCase() + fn.slice(1).toLowerCase();
+    const gFn = GREETINGS_NAMED[Math.floor(Math.random() * GREETINGS_NAMED.length)];
+    return gFn(fn);
+  }
+  const gGen = GREETINGS_GENERIC[Math.floor(Math.random() * GREETINGS_GENERIC.length)];
+  return gGen(comp);
+}
+
+function getSubject(contact, templateIdx) {
+  const defaultSubjects = [
+    'Application for SDE Intern — Pratham Raj | NIT Patna',
+    'Software Engineering Internship Inquiry — Pratham Raj (NIT Patna)',
+    'Exploring SDE Internship / Fresher Opportunities — Pratham Raj',
+    'SDE Intern Role Inquiry — Pratham Raj, NIT Patna \'27',
+    'Application: Software Engineer Intern — Pratham Raj',
+    'NIT Patna 2027 — SDE Internship Application | Pratham Raj'
+  ];
+  const pool = (config.subjects && config.subjects.length > 0) ? config.subjects : defaultSubjects;
+  const picked = pool[templateIdx % pool.length];
+  const comp = cleanCompanyName(contact.company);
+  return picked.replace(/\{\{company\}\}/g, comp || 'your company');
+}
+
+function getTemplates() {
+  if (Array.isArray(config.templates) && config.templates.length > 0) {
+    return config.templates;
+  }
+  if (config.message && config.message.body) {
+    return [{ id: 1, name: 'Default', body: config.message.body }];
+  }
+  throw new Error('No templates found in config.json');
+}
+
+function personalize(templateBody, contact, sender) {
+  const comp = cleanCompanyName(contact.company) || 'your organization';
+  const greeting = generateGreeting(contact);
   let firstName = 'Hiring Team';
   if (contact.name && !isGenericName(contact.name)) {
-    firstName = contact.name.split(' ')[0];
+    firstName = contact.name.trim().split(' ')[0];
     firstName = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
   }
-  return template
+
+  return templateBody
+    .replace(/\{\{greeting\}\}/g, greeting)
     .replace(/\{\{name\}\}/g, firstName)
     .replace(/\{\{full_name\}\}/g, contact.name || 'Hiring Team')
-    .replace(/\{\{company\}\}/g, contact.company || 'your company')
-    .replace(/\{\{resume_link\}\}/g, config.resume_link || '');
+    .replace(/\{\{company\}\}/g, comp)
+    .replace(/\{\{resume_link\}\}/g, config.resume_link || '')
+    .replace(/\{\{portfolio_link\}\}/g, config.portfolio_link || 'https://pratham2411.online')
+    .replace(/\{\{github_link\}\}/g, config.github_link || 'https://github.com/Pratham2411')
+    .replace(/\{\{linkedin_link\}\}/g, config.linkedin_link || 'https://linkedin.com/in/prathamraj2411')
+    .replace(/\{\{phone\}\}/g, config.phone || '7808519486')
+    .replace(/\{\{sender_email\}\}/g, sender.email);
 }
 
 function tierLabel(tier) {
@@ -209,7 +290,6 @@ function printStatus() {
     .get().c;
 
   const limitPerSender = config.daily_limit || 80;
-  const configuredSenders = (config.senders || []).filter(isSenderConfigured);
 
   console.log('');
   console.log('📊  Campaign Status');
@@ -248,6 +328,7 @@ function printStatus() {
   const totalLeft = Math.max(0, totalQuotaAvailable - totalSentToday);
   console.log('─'.repeat(60));
   console.log(`  Total sent today:       ${totalSentToday} / ${totalQuotaAvailable} (${totalLeft} remaining)`);
+  console.log(`  Templates in rotation:  ${getTemplates().length} distinct templates`);
   console.log('');
 }
 
@@ -303,6 +384,7 @@ async function verifySenders(sendersToVerify) {
 async function sendBatch() {
   const limitPerSender = config.daily_limit || 80;
   const allSenders = (config.senders || []).filter(isSenderConfigured);
+  const templates = getTemplates();
 
   if (allSenders.length === 0) {
     console.error('❌ No active sender accounts configured in config.json.');
@@ -351,10 +433,7 @@ async function sendBatch() {
   const totalBudgetLeft = activeSenders.reduce((sum, item) => sum + item.quotaLeft, 0);
   const actualBatch = Math.min(batchSize, totalBudgetLeft);
 
-  // Priority query: tier 1 → 2 → 3 → rest, real names first
-  const contacts = db
-    .prepare(
-      `
+  let query = `
     SELECT id, name, email, company, tier
     FROM contacts
     WHERE email_status = 'Not Contacted'
@@ -364,6 +443,19 @@ async function sendBatch() {
       AND email NOT LIKE '%example.com%'
       AND email NOT LIKE '%test@%'
       AND email NOT LIKE '%unsubscribe%'
+  `;
+
+  if (corporateOnly) {
+    query += `
+      AND email NOT LIKE '%@gmail.com'
+      AND email NOT LIKE '%@yahoo.com%'
+      AND email NOT LIKE '%@rediffmail.com'
+      AND email NOT LIKE '%@hotmail.com'
+      AND email NOT LIKE '%@outlook.com'
+    `;
+  }
+
+  query += `
     ORDER BY
       CASE
         WHEN tier = 1 THEN 1
@@ -377,23 +469,25 @@ async function sendBatch() {
       END ASC,
       company ASC
     LIMIT ?
-  `
-    )
-    .all(actualBatch);
+  `;
+
+  const contacts = db.prepare(query).all(actualBatch);
 
   if (contacts.length === 0) {
-    console.log('\n✅  All contacts have been emailed!');
+    console.log('\n✅ All contacts matching your filter have been emailed!');
     printStatus();
     return;
   }
 
   console.log(`\n📧  Sending batch of ${contacts.length} emails...`);
   console.log(`    Active sender account(s): ${activeSenders.map((a) => a.sender.email).join(', ')}`);
+  console.log(`    Template pool:            ${templates.length} rotating templates`);
+  console.log(`    Anti-spam protection:     Humanized pacing + Sender-matching Reply-To`);
 
   if (isDryRun) {
-    console.log('🧪  DRY RUN — no emails will actually be sent\n');
+    console.log('\n🧪  DRY RUN — previewing rotated emails (no actual sends):\n');
   } else {
-    console.log('🔐  Verifying sender credentials...');
+    console.log('\n🔐  Verifying sender credentials...');
     await verifySenders(activeSenders.map((a) => a.sender));
     console.log('');
   }
@@ -408,8 +502,14 @@ async function sendBatch() {
 
   let sentCount = 0;
   let errorCount = 0;
-  const cooldownInterval = config.cooldown_interval || 25;
-  const replyToEmail = config.reply_to || 'prathamraj1142@gmail.com';
+
+  // Anti-spam timing settings
+  const delayMin = isFastMode ? 3000 : (config.delay_min_ms || 15000);
+  const delayMax = isFastMode ? 6000 : (config.delay_max_ms || 35000);
+  const microPauseInterval = config.micro_pause_interval || 6;
+  const microPauseMin = isFastMode ? 5000 : (config.micro_pause_min_ms || 30000);
+  const microPauseMax = isFastMode ? 10000 : (config.micro_pause_max_ms || 60000);
+  const cooldownInterval = config.cooldown_interval || 20;
 
   const updateContact = db.prepare(`
     UPDATE contacts
@@ -419,8 +519,8 @@ async function sendBatch() {
     WHERE id = ?
   `);
   const insertLog = db.prepare(`
-    INSERT INTO send_log (contact_id, email, sender, status, error)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO send_log (contact_id, email, sender, template_id, subject, status, error)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   // Active pool of senders that have quota
@@ -438,14 +538,29 @@ async function sendBatch() {
     const transporter = isDryRun ? null : transporterMap.get(sender.email);
 
     const contact = contacts[i];
-    const subject = personalize(config.message.subject, contact);
-    const body = personalize(config.message.body, contact);
+
+    // Pick template in rotation
+    const templateIdx = i % templates.length;
+    const template = templates[templateIdx];
+
+    const subject = getSubject(contact, i);
+    const body = personalize(template.body, contact, sender);
     const tl = tierLabel(contact.tier);
 
+    // ANTI-SPAM RULE: Never spoof Reply-To with a mismatched @gmail.com
+    // Use sender.email as reply-to unless user explicitly forced a custom address
+    const replyTo = (config.reply_to && config.reply_to !== 'sender')
+      ? config.reply_to
+      : sender.email;
+
     if (isDryRun) {
+      const templateLabel = `Tpl #${template.id || templateIdx + 1}`;
       console.log(
-        `  ${tl}  [via ${sender.email.split('@')[0]}] ${contact.email.padEnd(38)} ${(contact.company || '?').padEnd(22)} ${contact.name || ''}`
+        `  ${tl}  [${templateLabel}] [via ${sender.email.split('@')[0]}] -> ${contact.email.padEnd(34)} ${(contact.company || '?').padEnd(20)}`
       );
+      console.log(`        Subj: "${subject}"`);
+      console.log(`        Opening: "${body.split('\n')[0]}"`);
+      console.log('');
       sentCount++;
       poolIdx++;
       continue;
@@ -454,14 +569,18 @@ async function sendBatch() {
     try {
       await transporter.sendMail({
         from: `"${sender.name}" <${sender.email}>`,
-        replyTo: replyToEmail,
+        replyTo: replyTo,
         to: contact.email,
         subject,
         text: body, // Plain text only — best deliverability
+        headers: {
+          'X-Priority': '3',
+          'Importance': 'normal',
+        },
       });
 
       updateContact.run(contact.id);
-      insertLog.run(contact.id, contact.email, sender.email, 'sent', null);
+      insertLog.run(contact.id, contact.email, sender.email, template.id || templateIdx + 1, subject, 'sent', null);
       sentCount++;
 
       // Decrement sender's quota
@@ -474,8 +593,9 @@ async function sendBatch() {
       }
 
       const progress = `[${i + 1}/${contacts.length}]`;
+      const templateTag = `Tpl #${template.id || templateIdx + 1}`;
       console.log(
-        `  ✅ ${progress.padEnd(10)} ${tl}  [via ${sender.email.split('@')[0]}] ${contact.email.padEnd(36)} ${contact.company || ''}`
+        `  ✅ ${progress.padEnd(9)} ${tl} [${templateTag}] [via ${sender.email.split('@')[0]}] ${contact.email.padEnd(34)} ${contact.company || ''}`
       );
     } catch (err) {
       errorCount++;
@@ -483,6 +603,8 @@ async function sendBatch() {
         contact.id,
         contact.email,
         sender.email,
+        template.id || templateIdx + 1,
+        subject,
         'error',
         err.message
       );
@@ -521,21 +643,28 @@ async function sendBatch() {
       }
     }
 
-    // Delay between emails
+    // Delay between emails (Anti-spam pacing)
     if (i < contacts.length - 1 && pool.length > 0) {
-      const delayMin = config.delay_min_ms || 3000;
-      const delayMax = config.delay_max_ms || 8000;
       const delay = rand(delayMin, delayMax);
 
-      // Batch cooldown every N emails
+      // Major cooldown pause every N emails
       if ((i + 1) % cooldownInterval === 0) {
-        const coolMin = config.cooldown_min_ms || 120000;
-        const coolMax = config.cooldown_max_ms || 300000;
+        const coolMin = isFastMode ? 10000 : (config.cooldown_min_ms || 180000);
+        const coolMax = isFastMode ? 15000 : (config.cooldown_max_ms || 360000);
         const cooldown = rand(coolMin, coolMax);
         const mins = (cooldown / 60000).toFixed(1);
-        console.log(`\n  ⏸️  Cooldown pause: ${mins} min ...\n`);
+        console.log(`\n  ⏸️  Batch cooldown pause: ${mins} min ...\n`);
         await sleep(cooldown);
-      } else {
+      }
+      // Micro-pause every M emails (mimics human reading between emails)
+      else if ((i + 1) % microPauseInterval === 0) {
+        const micro = rand(microPauseMin, microPauseMax);
+        const secs = Math.round(micro / 1000);
+        console.log(`  ⏸️  Micro-pause (human pacing): ${secs}s...`);
+        await sleep(micro);
+      }
+      // Normal randomized interval
+      else {
         await sleep(delay);
       }
     }
